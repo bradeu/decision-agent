@@ -19,7 +19,7 @@ class AgentState(TypedDict):
     messages: Annotated[list[AnyMessage], operator.add]
 
 class Agent:
-    def __init__(self, model_query, tool):
+    def __init__(self, model_query, query_tool, upsert_tool, search_tool):
         graph = StateGraph(AgentState)
         graph.add_node("llm_query", self.call_openai_query)
         graph.add_node("search", self.search) # call it search or rag

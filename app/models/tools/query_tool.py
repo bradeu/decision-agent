@@ -1,6 +1,7 @@
 from langchain_core.tools import tool
 from langchain_core.messages import ToolMessage
 import uuid
+from ...db.pinecone import db_helper_obj
 
 @tool
 def query_tool(sub_queries: list) -> ToolMessage:

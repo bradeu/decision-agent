@@ -8,8 +8,8 @@ async def agent():
 
 @router.get("/plan")
 async def planner():
-    return {"test": "hello world"}
+    return {"plan": "hello world"}
 
-@router.get("/revise")
-async def revise():
-    return {"test": "hello world"}
+@router.get("/feedback")
+async def feedback():
+    return {"feedback": "hello world"}
