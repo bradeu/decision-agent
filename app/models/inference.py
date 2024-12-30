@@ -9,7 +9,8 @@ class Inference:
 
     def query_workflow(self, user_query):
         model = ChatOpenAI(model="gpt-4o-mini")  # Updated to GPT-4o-mini
-        abot = Agent(model, query_tool, upsert_tool, search_tool)
+        tools = {"query_tool":query_tool, "upsert_tool":upsert_tool, "search_tool":search_tool}
+        abot = Agent(model, tools)
 
         messages = [HumanMessage(content=user_query)]
         result = abot.graph.invoke({"messages": messages})

@@ -1,7 +1,7 @@
 from langgraph.graph import StateGraph, END
 from typing import TypedDict, Annotated
 import operator
-from langchain_core.messages import AnyMessage, SystemMessage
+from langchain_core.messages import AnyMessage, SystemMessage, ToolMessage
 from dotenv import load_dotenv
 import json
 
@@ -12,84 +12,71 @@ import json
 #     format='%(asctime)s - %(levelname)s - %(message)s'
 # )
 
-
 _ = load_dotenv()
 
 class AgentState(TypedDict):
     messages: Annotated[list[AnyMessage], operator.add]
 
 class Agent:
-    def __init__(self, model_query, query_tool, upsert_tool, search_tool):
+    def __init__(self, model, tools):
         graph = StateGraph(AgentState)
-        graph.add_node("llm_query", self.call_openai_query)
-        graph.add_node("search", self.search) # call it search or rag
-        # graph.add_node("llm_filter", self.call_openai_filter)
-        graph.add_edge("llm_query", "search")
-        # graph.add_edge("search", "llm_filter")
-        graph.add_edge("search", END)
-        graph.set_entry_point("llm_query")
-        self.graph = graph.compile()
-        # self.tools = {t.name: t for t in tools}
-        # self.model_query = model_query.bind_tools(tools)
-        self.model_query = model_query
-        # self.model_filter = model_filter
-        self.tool = tool
 
-    def call_openai_query(self, state: AgentState):
-        # logging.debug(f"Entering 'call_openai_query' with state: {state}")
-        messages = state['messages']
-        # system_query = "Decompose the following query into simpler parts"
+        graph.add_node("breakdown_agent", self.call_openai_breakdown_tasks)
+        graph.add_node("qualification_agent", self.call_openai_qualification)
+        graph.add_node("decision_agent", self.call_openai_decision)
+        graph.add_node("take_action", self.take_action)
 
-        system_query = (
-        "Decompose the following query into simpler parts and return the result "
-        "as a JSON object with a key 'sub_queries' and a value that is a list of strings. "
-        "For example: {\"sub_queries\": [\"Question 1\", \"Question 2\"]}"
+        graph.add_conditional_edges(
+            "breakdown_agent",
+            self.exists_action,
+            {True: "action", False: "decision_agent"}
         )
+        graph.add_edge("action", "qualification_agent")
+        graph.add_conditional_edges(
+            "qualification_agent",
+            self.exists_action,
+            {True: "action", False: "breakdown_agent"}
+        )
+        graph.add_edge("decision_agent", END)
+
+        graph.set_entry_point("breakdown_agent")
+        self.graph = graph.compile()
+        self.tools = {t.name: t for t in tools}
+        self.model = model.bind_tools(tools)
+
+
+    def call_openai_breakdown_tasks(self, state: AgentState):
+        messages = state['messages']
+
+        system_query = """You are a breakdown agent, your task is to break down the query into multiple executable steps based on the available tools\You are allowed to make multiple calls (either together or in sequence). \
+            Only look up information when you are sure of what you want. \
+            If you need to look up some information before asking a follow up question, you are allowed to do that!"""
 
         messages = [SystemMessage(content=system_query)] + messages
-        message = self.model_query.invoke(messages)
+        message = self.model.invoke(messages)
         new_state = {'messages': [message]}
-        # logging.debug(f"Exiting 'call_openai_query' with new state: {new_state}")
         return new_state
     
-    def search(self, state: AgentState):
-        # logging.debug(f"Entering 'search' with state: {state}")
-        ai_message_content = state['messages'][-1].content
+    def call_openai_qualification(self, state: AgentState):
+        pass
 
-        try:
-            decomposed_queries = json.loads(ai_message_content)
-            # logging.debug(f"decomposed_queries: {decomposed_queries}")
-        except json.JSONDecodeError:
-            print("Error: Failed to parse JSON response.")
+    def call_openai_decision(self, state: AgentState):
+        pass
 
-        message = self.tool.invoke(decomposed_queries)
-        new_state = {'messages': [message]}
-        # logging.debug(f"Exiting 'search' with new state: {new_state}")
-        return new_state
-    
-    # def call_openai_filter(self, state: AgentState):
-    #     query = state['messages'][0].content
-    #     system_filter = f"Filter and summarize the following results based on the given query:{query}."
+    def exists_action(self, state: AgentState):
+        result = state['messages'][-1]
+        return len(result.tool_calls) > 0
 
-    #     messages = state['messages'][-1]
-    #     messages = [SystemMessage(content=system_filter)] + messages
-    #     message = self.model_filter.invoke(messages)
-    #     return {'messages': [message]}
-
-    # def exists_action(self, state: AgentState):
-    #     result = state['messages'][-1]
-    #     return len(result.tool_calls) > 0
-
-    # def take_action(self, state: AgentState):
-    #     tool_calls = state['messages'][-1].tool_calls
-    #     results = []
-    #     for t in tool_calls:
-    #         print(f"Calling: {t}")
-    #         if not t['name'] in self.tools:
-    #             print("\n ....bad tool name....")
-    #             result = "bad tool name, retry"
-    #         else:
-    #             result = self.tools[t['name']].invoke(t['args'])
-    #         results.append(ToolMessage(tool_call_id=t['id'], name=t['name'], content=str(result)))
-    #     print("To the filter model!")
-    #     return {'messages': results}
+    def take_action(self, state: AgentState):
+        tool_calls = state['messages'][-1].tool_calls
+        results = []
+        for t in tool_calls:
+            print(f"Calling: {t}")
+            if not t['name'] in self.tools:
+                print("\n ....bad tool name....")
+                result = "bad tool name, retry"
+            else:
+                result = self.tools[t['name']].invoke(t['args'])
+            results.append(ToolMessage(tool_call_id=t['id'], name=t['name'], content=str(result)))
+        print("To the filter model!")
+        return {'messages': results}
