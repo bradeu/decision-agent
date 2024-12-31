@@ -18,7 +18,7 @@ class AgentState(TypedDict):
     messages: Annotated[list[AnyMessage], operator.add]
 
 class Agent:
-    def __init__(self, model, tools):
+    def __init__(self, model_breakdown, model_qualification, model_decision, tools):
         graph = StateGraph(AgentState)
 
         graph.add_node("breakdown_agent", self.call_openai_breakdown_tasks)
@@ -29,20 +29,22 @@ class Agent:
         graph.add_conditional_edges(
             "breakdown_agent",
             self.exists_action,
-            {True: "action", False: "decision_agent"}
+            {True: "take_action", False: "decision_agent"}
         )
-        graph.add_edge("action", "qualification_agent")
+        graph.add_edge("take_action", "qualification_agent")
         graph.add_conditional_edges(
             "qualification_agent",
             self.exists_action,
-            {True: "action", False: "breakdown_agent"}
+            {True: "take_action", False: "breakdown_agent"}
         )
         graph.add_edge("decision_agent", END)
 
         graph.set_entry_point("breakdown_agent")
         self.graph = graph.compile()
         self.tools = {t.name: t for t in tools}
-        self.model = model.bind_tools(tools)
+        self.model_breakdown = model_breakdown.bind_tools(tools)
+        self.model_qualification = model_qualification.bind_tools(tools)
+        self.model_decision = model_decision.bind_tools(tools)
 
 
     def call_openai_breakdown_tasks(self, state: AgentState):
@@ -54,7 +56,7 @@ class Agent:
             If you need to look up some information before asking a follow up question, you are allowed to do that!"""
 
         messages = [SystemMessage(content=system_query)] + messages
-        message = self.model.invoke(messages)
+        message = self.model_breakdown.invoke(messages)
         new_state = {'messages': [message]}
         return new_state
     
@@ -65,7 +67,7 @@ class Agent:
         system_query = f"You are a qualification sub-agent, your task is to make sure that the informations provided covered fully this query: {initial_message}."
 
         messages = [SystemMessage(content=system_query)] + messages
-        message = self.model.invoke(messages)
+        message = self.model_qualification.invoke(messages)
         new_state = {'messages': [message]}
         return new_state
 
@@ -76,7 +78,7 @@ class Agent:
         system_query = f"You are a decision sub-agent, your task is to decide which booking is the best based on this query: {initial_message}."
 
         messages = [SystemMessage(content=system_query)] + messages
-        message = self.model.invoke(messages)
+        message = self.model_decision.invoke(messages)
         new_state = {'messages': [message]}
         return new_state
 
